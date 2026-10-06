@@ -79,6 +79,39 @@ def main() -> None:
     print("Active:", user.get("is_active"))
 
     print()
+    print("3. Calling FastAPI /api/v1/institutions...")
+
+    institutions_response = httpx.get(
+        f"{FASTAPI_URL}/api/v1/institutions",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+        timeout=20,
+    )
+
+    print("Institutions HTTP:", institutions_response.status_code)
+
+    if not institutions_response.is_success:
+        print("Institution API failed:")
+        print(institutions_response.text)
+        raise SystemExit(1)
+
+    institutions = institutions_response.json()
+
+    print("Institution authorization: PASS")
+    print("Visible institutions:", len(institutions))
+
+    for institution in institutions:
+        print(
+            "-",
+            institution["code"],
+            "|",
+            institution["name"],
+            "|",
+            institution["city"],
+        )
+
+    print()
     print("AUTHENTICATION FLOW: PASS")
 
 
