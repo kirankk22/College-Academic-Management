@@ -1,19 +1,29 @@
 from fastapi import APIRouter
 
-from app.core.config import get_settings
+from app.db.session import check_database_connection
 
-router = APIRouter(tags=["system"])
+
+router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "service": "college-management-api"}
+    return {
+        "status": "ok",
+    }
 
 
 @router.get("/ready")
 def ready() -> dict[str, str]:
-    settings = get_settings()
+    database_ready = check_database_connection()
+
+    if not database_ready:
+        return {
+            "status": "not_ready",
+            "database": "unavailable",
+        }
+
     return {
         "status": "ready",
-        "environment": settings.environment,
+        "database": "ok",
     }
