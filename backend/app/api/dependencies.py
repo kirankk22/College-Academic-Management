@@ -1,4 +1,3 @@
-from collections.abc import Generator
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
