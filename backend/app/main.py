@@ -6,6 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 
+from app.api.faculty_assignments import router as faculty_assignments_router
+
 settings = get_settings()
 
 logging.basicConfig(
@@ -28,3 +30,4 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+app.include_router(faculty_assignments_router)
