@@ -1,4 +1,5 @@
 import os
+from unittest.mock import patch
 
 os.environ["ENVIRONMENT"] = "test"
 os.environ["LOG_LEVEL"] = "WARNING"
@@ -22,7 +23,12 @@ def test_health():
 
 
 def test_ready():
-    response = client.get("/ready")
+    with patch(
+        "app.api.health.check_database_connection",
+        return_value=True,
+    ):
+        response = client.get("/ready")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+    assert response.json()["database"] == "ok"
