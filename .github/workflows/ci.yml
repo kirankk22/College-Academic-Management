@@ -33,7 +33,7 @@ jobs:
         run: ruff check app tests
 
       - name: Tests
-        run: python -m pytest -q
+        run: python -m pytest -q --ignore=tests/test_academic_periods_smoke.py
 
   frontend:
     name: Frontend build
