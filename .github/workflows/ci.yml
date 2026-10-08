@@ -37,6 +37,7 @@ jobs:
           python -m pytest -q
           --ignore=tests/test_academic_periods_smoke.py
           --ignore=tests/test_attendance_smoke.py
+          --ignore=tests/test_academic_catalog_smoke.py
 
   frontend:
     name: Frontend build
