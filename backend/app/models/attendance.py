@@ -73,3 +73,22 @@ class AttendanceCorrectionResponse(BaseModel):
     changed_by_faculty_id: UUID | None = None
     source: str
     changed_at: datetime
+
+
+class AttendanceBulkItem(BaseModel):
+    student_id: UUID
+    status: str
+
+
+class AttendanceBulkCreate(BaseModel):
+    subject_id: UUID
+    section_id: UUID
+    academic_period_id: UUID
+    attendance_date: date
+    source: str = "DIRECT"
+    records: list[AttendanceBulkItem] = Field(min_length=1)
+
+
+class AttendanceBulkResponse(BaseModel):
+    saved_count: int
+    records: list[AttendanceResponse]

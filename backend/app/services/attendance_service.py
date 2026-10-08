@@ -753,3 +753,194 @@ def list_corrections(
     )
 
     return result.mappings().all()
+
+def create_bulk_attendance(
+    db: Session,
+    institution_id: UUID,
+    user_id: UUID,
+    user_role: str,
+    payload,
+):
+    """
+    Create attendance for multiple students as one atomic transaction.
+
+    Business rules:
+    - DIRECT source only.
+    - Every student must belong to the selected academic context.
+    - Faculty must be actively assigned to the subject/section.
+    - Existing attendance records are rejected.
+    - Duplicate students inside the request are rejected.
+    - No rows are committed unless every validation succeeds.
+    """
+
+    source = _validate_source(payload.source)
+
+    if source != "DIRECT":
+        raise AttendanceError(
+            "Bulk direct attendance API accepts only DIRECT source"
+        )
+
+    if not payload.records:
+        raise AttendanceError(
+            "At least one student attendance record is required"
+        )
+
+    student_ids = [record.student_id for record in payload.records]
+
+    if len(student_ids) != len(set(student_ids)):
+        raise AttendanceConflictError(
+            "The same student cannot appear more than once in one "
+            "bulk attendance submission"
+        )
+
+    normalized_records = []
+
+    for record in payload.records:
+        status_value = _validate_status(record.status)
+
+        normalized_records.append(
+            {
+                "student_id": record.student_id,
+                "status": status_value,
+            }
+        )
+
+    first_context = _validate_institution_scope(
+        db=db,
+        institution_id=institution_id,
+        student_id=student_ids[0],
+        subject_id=payload.subject_id,
+        section_id=payload.section_id,
+        academic_period_id=payload.academic_period_id,
+    )
+
+    faculty_id = None
+
+    if user_role == "faculty":
+        faculty_id = _validate_faculty_assignment(
+            db=db,
+            institution_id=institution_id,
+            user_id=user_id,
+            subject_id=payload.subject_id,
+            section_id=payload.section_id,
+            academic_year_id=first_context["academic_year_id"],
+        )
+
+    validated_contexts = []
+
+    for record in normalized_records:
+        context = _validate_institution_scope(
+            db=db,
+            institution_id=institution_id,
+            student_id=record["student_id"],
+            subject_id=payload.subject_id,
+            section_id=payload.section_id,
+            academic_period_id=payload.academic_period_id,
+        )
+
+        validated_contexts.append(context)
+
+    for record in normalized_records:
+        existing = db.execute(
+            text(
+                """
+                select id, status
+                from public.attendance
+                where institution_id = :institution_id
+                  and student_id = :student_id
+                  and subject_id = :subject_id
+                  and section_id = :section_id
+                  and academic_period_id = :academic_period_id
+                  and attendance_date = :attendance_date
+                limit 1
+                """
+            ),
+            {
+                "institution_id": institution_id,
+                "student_id": record["student_id"],
+                "subject_id": payload.subject_id,
+                "section_id": payload.section_id,
+                "academic_period_id": payload.academic_period_id,
+                "attendance_date": payload.attendance_date,
+            },
+        ).mappings().first()
+
+        if existing is not None:
+            raise AttendanceConflictError(
+                "Attendance already exists for one or more students "
+                "for this subject, section, academic period and date; "
+                "use PATCH to correct existing attendance"
+            )
+
+    saved_records = []
+
+    try:
+        for record in normalized_records:
+            result = db.execute(
+                text(
+                    f"""
+                    insert into public.attendance as a (
+                        institution_id,
+                        student_id,
+                        subject_id,
+                        section_id,
+                        academic_period_id,
+                        attendance_date,
+                        status,
+                        source,
+                        marked_by_user_id,
+                        marked_by_faculty_id
+                    )
+                    values (
+                        :institution_id,
+                        :student_id,
+                        :subject_id,
+                        :section_id,
+                        :academic_period_id,
+                        :attendance_date,
+                        :status,
+                        :source,
+                        :marked_by_user_id,
+                        :marked_by_faculty_id
+                    )
+                    returning {ATTENDANCE_COLUMNS}
+                    """
+                ),
+                {
+                    "institution_id": institution_id,
+                    "student_id": record["student_id"],
+                    "subject_id": payload.subject_id,
+                    "section_id": payload.section_id,
+                    "academic_period_id": payload.academic_period_id,
+                    "attendance_date": payload.attendance_date,
+                    "status": record["status"],
+                    "source": source,
+                    "marked_by_user_id": user_id,
+                    "marked_by_faculty_id": faculty_id,
+                },
+            )
+
+            attendance = result.mappings().first()
+
+            if attendance is None:
+                raise AttendanceError(
+                    "Bulk attendance record could not be created"
+                )
+
+            saved_records.append(attendance)
+
+        db.commit()
+
+        return saved_records
+
+    except IntegrityError as exc:
+        db.rollback()
+
+        raise AttendanceConflictError(
+            "Bulk attendance could not be saved because one or more "
+            "attendance records already exist"
+        ) from exc
+
+    except Exception:
+        db.rollback()
+        raise

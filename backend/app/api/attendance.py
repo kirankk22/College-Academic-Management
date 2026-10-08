@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.api.authorization import require_roles
 from app.db.session import get_db
 from app.models.attendance import (
+    AttendanceBulkCreate,
+    AttendanceBulkResponse,
     AttendanceCorrectionResponse,
     AttendanceCreate,
     AttendanceResponse,
@@ -18,6 +20,7 @@ from app.services.attendance_service import (
     AttendanceError,
     AttendanceNotFoundError,
     create_attendance,
+    create_bulk_attendance,
     get_attendance,
     list_attendance,
     list_corrections,
@@ -90,39 +93,6 @@ def get_attendance_records(
     )
 
 
-@router.get(
-    "/{attendance_id}",
-    response_model=AttendanceResponse,
-)
-def get_attendance_record(
-    attendance_id: UUID,
-    current_user: AuthenticatedUser = Depends(
-        require_roles(
-            "organization_admin",
-            "principal",
-            "hod",
-            "faculty",
-        )
-    ),
-    db: Session = Depends(get_db),
-):
-    current_user = require_institution_scope(current_user)
-
-    attendance = get_attendance(
-        db=db,
-        institution_id=current_user.institution_id,
-        attendance_id=attendance_id,
-    )
-
-    if attendance is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Attendance not found",
-        )
-
-    return attendance
-
-
 @router.post(
     "",
     response_model=AttendanceResponse,
@@ -161,6 +131,84 @@ def create_attendance_record(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+
+
+@router.post(
+    "/bulk",
+    response_model=AttendanceBulkResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_bulk_attendance_records(
+    payload: AttendanceBulkCreate,
+    current_user: AuthenticatedUser = Depends(
+        require_roles(*WRITE_ROLES)
+    ),
+    db: Session = Depends(get_db),
+):
+    current_user = require_institution_scope(current_user)
+
+    try:
+        records = create_bulk_attendance(
+            db=db,
+            institution_id=current_user.institution_id,
+            user_id=current_user.user_id,
+            user_role=current_user.role,
+            payload=payload,
+        )
+
+        return AttendanceBulkResponse(
+            saved_count=len(records),
+            records=records,
+        )
+
+    except AttendanceConflictError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+
+    except AttendanceError as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/{attendance_id}",
+    response_model=AttendanceResponse,
+)
+def get_attendance_record(
+    attendance_id: UUID,
+    current_user: AuthenticatedUser = Depends(
+        require_roles(
+            "organization_admin",
+            "principal",
+            "hod",
+            "faculty",
+        )
+    ),
+    db: Session = Depends(get_db),
+):
+    current_user = require_institution_scope(current_user)
+
+    attendance = get_attendance(
+        db=db,
+        institution_id=current_user.institution_id,
+        attendance_id=attendance_id,
+    )
+
+    if attendance is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Attendance not found",
+        )
+
+    return attendance
 
 
 @router.patch(
